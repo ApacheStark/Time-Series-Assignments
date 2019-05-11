@@ -1,0 +1,442 @@
+---
+title: "MATH1318 - Time Series - Assignment 2"
+author: "Samuel Holt"
+date: "May 10, 2019"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+---
+
+# Introduction
+
+The data provided for this assignment was the annual egg depositions (in millions) of age-3 Lake Huron Bloaters (Coregnous hoyi) between the years of 1981 and 1996. This data are available from the FSAdata package.
+
+For this report I will be investigating deterministic and stochastic trends. First I will process and prepare the data to look at stationarity, existence of a trend, a change in variance, possible seasonality and intervention points, and behavior f the time series. Then I will fit and evaluate deterministic and stochastic models to the data. Once a valid model has been found, I will forecast the following 5 years of the data.  
+
+## Packages
+
+```{r setup, include=FALSE}
+library(tseries)
+library(fUnitRoots)
+library(TSA)
+library(lmtest)
+library(forecast)
+library(tinytex)
+```
+
+## Import Data
+
+```{r}
+setwd("C:/Users/samgh/Desktop/Masters of Statistics and Operations Research/Year 2/Sem 1/Time Series Analysis/Assignments/Assignment 2")
+eggs <- read.csv('eggs.csv')
+eggs_ts <- ts(eggs$eggs, start = 1981, frequency = 1)
+```
+
+```{r, echo = FALSE}
+# Run both AutoCorrelation Function and Partial AutoCorreltion Functions and visualise together
+acf_pacf <- function(x) {
+  par(mfrow = c(1, 2))
+  TSA::acf(x)
+  stats::pacf(x)
+  par(mfrow = c(1, 1))
+}
+
+# Fit a Model and then summarise and visualise Standardised Residuals
+model_ts_res <- function(x, method) {
+  if (method == 'linear') {
+    t <- time(x)
+    lin_mod <- lm(x ~ t)
+    lin_res <- rstudent(lin_mod)
+    sum_lin <- summary(lin_mod)
+    r2 <- round(sum_lin$r.squared, 3)
+    plot(lin_res, type = 'o', main = 'Residuals of Linear Model Fitted')
+    abline(h = 0)
+    text(5, lin_res[5] + 1, paste('R-Squared =', r2))
+    return(sum_lin)
+  }
+  if (method == 'quadratic') {
+    t <- time(x)
+    t2 <- t ^ 2
+    quad_mod <- lm(x ~ t + t2)
+    quad_sum <- summary(quad_mod)
+    r2_q <- round(quad_sum$r.squared, 3)
+    quad_res <- rstudent(quad_mod)
+    plot(quad_res, type = 'o', main = 'Residuals of Fitted Quadratic Model')
+    abline(h = 0)
+    text(5, quad_res[5] + 1, paste('R-Squared =', r2_q))
+    return(quad_sum)
+  }
+}
+
+# Visualise Fitted Quadratic Model
+fit_quad_mod <- function(data){
+  t <- time(data)
+  t2 <- t ^ 2
+  quad_mod <- lm(data ~ t + t2)
+  newd <- data.frame(t = t, t2 = t2)
+  pred <- predict(quad_mod, newd, interval = 'prediction')
+  plot(data, type = 'o', main = 'Fitted Quadractic Model Overlay')
+  lines(ts(as.vector(pred[,1]), start = min(t)), col = 2)
+}
+  
+# Runs a Hypthesis Test for Normality fo Given Data Points
+normal_test <- function(x) {
+  shap <- shapiro.test(x)
+  shap_p <- round(shap$p.value, 3)
+  qqnorm(x)
+  qqline(x, col = 'red')
+  text(min(x) + 0.1, max(x), paste('Shap-Wilks p-value = ', shap_p))
+}
+```
+
+## Visualise Data
+
+Visualise the time series data and investigate trend, change in variance, seasonality, intervention point, and behavior. These aspects will aid modelling decisions.
+
+```{r}
+plot(eggs_ts, type = 'o')
+```
+
+There is a positive upward trend in the data. Perhaps a gradual increase in variance, although that may have been caused by the outlier in 1990. No seasonality is immediately or obviously present.A possible intervention point at 1988, causing a great increase over 2 year, and then perhaps again at 1990 bloater population control measures were implemented so that successive years saw either decrease or very slight increase in depositions. The time series seems to follow an auto regressive behavior.  
+
+## Auto Correlations of Lags
+
+```{r}
+acf_pacf(eggs_ts)
+```
+
+For the auto correlation and partial auto correlation functions, there are significant lags at lag 1. The ACF displays a sinusoidal pattern, coupled with a significant lag at 1 for the PACF, this confirms the presence of a trend in the time series data. Also indicates the non-stationarity of the data, of which will need to be transformed and differenced for ARMA/ARIMA models in the following section.
+
+# Deterministic Trends
+
+For this section, I will be fitting and evaluating deterministic trends. Firstly with a linear model followed by a quadratic model. A harmonic model has not been considered as no seasonality nor harmonic properties are present in the time series. For each fitted model, I will be evaluating the standardised residuals of the model, looking for homoscedasticity, normality and the auto correlations. For this, I have created a function that fits a specified model and then displays the R-squared value alongside a plot of the residuals.
+
+## Fitting and Evaluating a Linear Model
+
+```{r}
+model_ts_res(eggs_ts, method = 'linear')
+```
+
+Looking at the standardised residuals of the fitted linear model, we can see the outlier in 1990 has caused a great shift in variance of residuals. With the R-squared value being 0.447, we can say that 44.7% of the data are explained by the independent variable, time. Despite all coefficients holding statistically significant values, this model is misleading regarding it's predictive capacity, as clearly the lack of homodescaticity of the residuals indicates the model is not capturing some behaviors within the time series. We shall further investigate this by looking at the normality of standardised residuals.
+
+### Hypothesis test of Normality of Residuals
+
+```{r}
+t <- time(eggs_ts)
+lin_mod <- lm(eggs_ts ~ t)
+lin_res <- rstudent(lin_mod)
+normal_test(lin_res)
+```
+
+The distribution of the standardised residuals for the fitted linear model shows no signs of normality. With a p-value < 0.001, we reject the null hypothesis of the Shapiro-Wilks test, and presume the residuals are not normally distributed. 
+
+Below an auto correlation function will be produced to investigate for white noise properties.
+
+### ACF for Linear Model Residuals
+
+```{r}
+acf(lin_res)
+```
+
+This ACF of the fitted linear model standardised residuals shows no significant lags. The first lag however is very close to the threshold and is a standout among the lag significance values. This is indicative of a model lacking in capturing all trend behaviors. 
+
+In conclusion, we have proven the linear model to be ineffectual of capturing all behaviors in the time series and thus would be limited in its predictive capabilities.
+
+Below a visualisation of the linear model has been provided for reference.
+
+### Visualise Fitted Model
+
+```{r}
+lin_mod <- lm(eggs_ts ~ t)
+plot(eggs_ts, type = 'o')
+abline(lin_mod, col = 2, lty = 2)
+```
+
+## Fitting and Evaluating a Quadratic Model
+
+
+
+```{r}
+model_ts_res(eggs_ts, method = 'quadratic')
+```
+
+Fitting a quadratic model to the time series shows an improved R-squared value of 0.593, compared to the previous linear fit. This indicates that a quadratic model explains 59.3% of the variability in the time series data. Although an improvement upon the linear model of 0.447 and all coefficients have been found to be statistically significant, this is still deemed as an ineffectual model for capturing all trends. Below I will investigate normality of the standardised residuals of the fitted quadratic model. 
+
+### Hyptohesis test of Normality of Residuals
+
+```{r}
+t <- time(eggs_ts)
+t2 <- t ^ 2
+quad_mod <- lm(eggs_ts ~ t + t2)
+quad_res <- rstudent(quad_mod)
+normal_test(quad_res)
+```
+
+The distribution of the standardised residuals for the fitted quadratic model shows no signs of normality. With a p-value = 0.038, we reject the null hypothesis of the Shapiro-Wilks test, and presume the residuals are not normally distributed. 
+
+
+
+### ACF for Quadratic Model Residuals
+
+```{r}
+acf(quad_res)
+```
+
+For the auto correlation function plot of the standardised residuals of the fitted quadratic model, there is a significant value for lag 3. There is also a slight presence of a pattern in the values, indicating not only an invalid model, but a further trend or behavior the model is not capturing. 
+
+Below I have visualised the quadratic model for reference. We can see that the outlier in 1990 has caused the model to believe there will be a continuing downward trend after 1992. 
+
+### Visualise Fitted Model
+
+```{r}
+fit_quad_mod(eggs_ts)
+```
+
+# Stochastic Trends
+
+In this section I will be investigating the parameters of ARMA and ARIMA models, evaluating the parameters found and then forecasting with the most statistically significant model for the next 5 years. 
+
+I will investigate the possible transformation of the data by searching for possible values of lambda using the Box Cox transform function. Then I will look into possible differencing of the data to form a stationary time series to model with ARMA/ARIMA. I will then search for valid parameters of the ARMA/ARIMA model and then evaluate these models using BIC/AIC functions. The normality of these residuals will be explored
+
+## Data Transformation
+
+### Box Cox
+
+```{r}
+box_this <-
+  TSA::BoxCox.ar(eggs_ts, lambda = seq(-1, 1.5, 0.1), method = 'yw')
+box_this$ci
+eggs_sq <- sqrt(eggs_ts)
+```
+
+### ACF and PACF of Transformed Data
+
+```{r}
+acf_pacf(eggs_sq)
+```
+
+### Transformed Data Visualisation
+
+```{r}
+plot(
+  eggs_ts,
+  col = 'red',
+  lwd = 2,
+  main = 'Bloaters Data Transformed',
+  xlab = 'Year',
+  ylab = "Eggs Depositions by Bloaters (millions)",
+  type = 'o'
+)
+lines(eggs_sq, col = 'blue', lwd = 2, type = 'o')
+legend('topleft', legend = c('Original', 'Square Root'),col = c('red','blue'), pch = 15)
+```
+
+## Differencing Transformed Data
+
+```{r}
+ar(diff(eggs_sq))$order
+adfTest(eggs_sq, lags = 0)
+
+eggs_d1 <- diff(eggs_sq, difference = 1)
+ar(diff(eggs_d1))$order
+adfTest(eggs_d1, lags = 4)
+
+eggs_d2 <- diff(eggs_sq, difference = 2)
+ar(diff(eggs_d2))$order
+adfTest(eggs_d2, lags = 4)
+
+eggs_d3 <- diff(eggs_sq, difference = 3)
+ar(diff(eggs_d3))$order
+adfTest(eggs_d3, lags = 4)
+
+eggs_d4 <- diff(eggs_sq, difference = 4)
+ar(diff(eggs_d4))$order
+adfTest(eggs_d4, lags = 2)
+```
+
+### Visualise Differenced Data
+
+```{r}
+plot(eggs_d4)
+```
+
+## Models for Differenced Data
+
+### ACF and PACF
+
+```{r}
+acf_pacf(eggs_d4) # q = 1, p = 2
+# ARIMA(2,4,1) or ARIMA(1,4,1) since the second PACF signif lag is very close
+```
+
+### EACF
+
+``` {r}
+eacf(eggs_d4, ar.max = 2, ma.max = 2)
+# ARIMA(1,4,0) or ARIMA(0,4,1)
+```
+
+### BIC Table
+
+```{r}
+res <- armasubsets(eggs_d4, nar = 3, nma = 3)
+plot(res)
+```
+
+## Fitting ARIMA Models
+
+In accordance with the ACF, PACF, EACF and the BIC table outputs, the following models will be fitted, have hypothesis test run for each of its respective coefficients and then compared using AIC and BIC functions:
+
+- ARIMA(0,4,1)
+- ARIMA(0,4,2)
+- ARIMA(1,4,0)
+- ARIMA(2,4,0)
+- ARIMA(2,4,2)
+- ARIMA(1,4,1)
+- ARIMA(1,4,2)
+- ARIMA(2,4,1)
+- ARIMA(2,4,2)
+
+The method argument will be set to maximum likelihood as it is the most accurate despite being CPU intensive, due to the small scale of the data, this should not cause issues.
+
+```{r}
+model041 <- arima(eggs_sq, order = c(0,4,1), method = 'ML')
+model140 <- arima(eggs_sq, order = c(1,4,0), method = 'ML')
+model141 <- arima(eggs_sq, order = c(1,4,1), method = 'ML')
+model142 <- arima(eggs_sq, order = c(1,4,2), method = 'ML')
+model042 <- arima(eggs_sq, order = c(0,4,2), method = 'ML')
+model240 <- arima(eggs_sq, order = c(2,4,0), method = 'ML')
+model241 <- arima(eggs_sq, order = c(2,4,1), method = 'ML')
+model242 <- arima(eggs_sq, order = c(2,4,2), method = 'ML')
+```
+
+### Running Hypothesis Tests for Coefficients 
+
+```{r}
+coeftest(model041) # theta1 = -0.97, p-val < 0.001 stat signif
+coeftest(model140) # phi1 = -0.753, p-val < 0.001 stat signif
+coeftest(model141) # phi1 = -0.594, theta1 = -0.972, both stat signif
+coeftest(model142) # ph1 not stat sig, theta1 = -1.844, theta2 = 0.907, both MA parameters stat signif
+coeftest(model042)
+coeftest(model240)
+coeftest(model241) # phi1 = -0.750, phi2 not stat signit, theta1 = -0.967 stat signif
+coeftest(model242) # neither phi value stat signif, theta1 = -1.84, theta2 = 0.91, both stat signif
+```
+
+Only the models ARIMA(2,4,1) and ARIMA(2,4,2) display overfitting with insignificant coefficients, the rest all hold significant values. These remaining models will be funneled into AIC and BIC functions to determine the best fit for forecasting.
+
+### Refining Models with AIC and BIC Tests
+
+```{r}
+AIC(model041,model140,model042,model240,model141,model142,model241,model242) # ARIMA(0,4,2) with 25.8
+```
+
+For the AIC ranking, the best fit model is the ARIMA(0,4,2), I will continue with the BIC function to see if it agrees with the AIC function output.
+
+```{r}
+BIC(model041,model140,model240,model042,model141,model142,model241,model242) # ARIMA(0,4,2) with 27.01
+```
+
+Here we see the BIC function agrees with the previous AIC function, the model ARIMA(0,4,2) will have its residuals investigated for normality and significance of lags to validate the model, if these tests are deemed satisfactory, the model will be used to forecast for the proceeding 5 years.
+
+## Evaluating the Fit of the optimal ARIMA Model
+
+### Normality of Residuals
+
+```{r}
+normal_test(residuals(model042)) 
+```
+
+The normality of the standardised residuals is proven to be evident with a p-value from the Shapiro-Wilks test for normality at 0.331. This means we fail to reject the null hypothesis and presume that the residuals are normally distributed for the ARIMA(0,4,2) model.
+
+### Significance of Lags
+
+```{r}
+acf_pacf(residuals(model042)) # white noise present
+```
+
+The ACF and PACF plots demonstrate white noise characteristics, a late significant value at lag 4, although the residual values for the ACF and PACF are clearly detrended and are without are noticeable pattern. 
+The Ljung-Box test will be run for the residuals of the model to investigate significant lags further. The tsdiag function visualises this test, alongside an ACF plot and the standardised residuals.
+
+```{r}
+Box.test(residuals(model042), lag = 10, type = 'Ljung-Box', fitdf = 0) # supports no autocorrelations up to lag 10
+tsdiag(model042, gof = 15, omit.initial = F) # although very close on lag 5, no statistically significant autocorreltive lags
+```
+
+The Box-Ljung test p-value comes to 0.1869, therefore we fail to reject the null hypothesis and presume there are independently distributed and do not exhibit any significant lags. The graphics provided further demonstrate this claim as not p-value falls below the alpha level.
+
+Now we will forecast the following 5 years of the time series data with the ARIMA(0,4,2) model. A
+
+## Forecast with ARIMA Model
+
+```{r}
+fit = Arima(eggs_ts, order = c(0,4,2), lambda = 0.5)
+par(mfrow = c(1,2))
+plot(forecast(fit, h = 5), type = 'o', main = 'Full 5 Year Forecast ARIMA(0,4,2)')
+plot(forecast(fit, h = 5), type = 'o', ylim = c(-1,2.3), main = 'Zoom In of ARIMA(0,4,2) Forecast')
+```
+
+## Summary of Fitted ARIMA Model
+
+An ARIMA model was fitted to predict the following 5 years of the bloater egg depositions time series data from 1981 to 1996. This ARIMA model's parameters were defined by investigating the transformed data with ACF, PACF, EACF and BIC tables. Each of the model options then had their parameter estimate coefficients tested for statistical significance. The models of which that held statistical significance (p-value < alpha level) and were without symptoms of overfitting would evaluated together using AIC and BIC functions. The lowest value from this function would coincide with the most effective model. This model was found to be ARIMA(0,4,2). The following 5 years was then predicted, with a close up of the single predicted values for the time series.
+
+## Strengths and Limitations of the Model
+
+The ARIMA(0,4,2) model, although holding greatest significance for all statistical tests compared to the other models presented, shows a vast range of possible values after only a few years. This would suggest that the moving average behavior of the fit may be too much for the time series data. I would go further in suggesting that the original data visually displayed auto regressive characteristics, but as shown p = 0, meaning no auto regressive behavior is being considered for the model. A further limitation of the predictive aspects of the model is that there are negative values present in the forecast, which is not helpful as a egg depositions cannot have a negative count.
+
+Below is an appendix of the custom functions created for the report.
+
+# Appendix
+
+```{r}
+# Run both AutoCorrelation Function and Partial AutoCorreltion Functions and visualise together
+acf_pacf <- function(x) {
+  par(mfrow = c(1, 2))
+  TSA::acf(x)
+  stats::pacf(x)
+  par(mfrow = c(1, 1))
+}
+# Fit a Model and then summarise and visualise Standardised Residuals
+model_ts_res <- function(x, method) {
+  if (method == 'linear') {
+    t <- time(x)
+    lin_mod <- lm(x ~ t)
+    lin_res <- rstudent(lin_mod)
+    sum_lin <- summary(lin_mod)
+    r2 <- round(sum_lin$r.squared, 3)
+    plot(lin_res, type = 'o', main = 'Residuals of Linear Model Fitted')
+    abline(h = 0)
+    text(5, lin_res[5] + 1, paste('R-Squared =', r2))
+  }
+  if (method == 'quadratic') {
+    t <- time(x)
+    t2 <- t ^ 2
+    quad_mod <- lm(x ~ t + t2)
+    quad_sum <- summary(quad_mod)
+    r2_q <- round(quad_sum$r.squared, 3)
+    quad_res <- rstudent(quad_mod)
+    plot(quad_res, type = 'o', main = 'Residuals of Fitted Quadratic Model')
+    abline(h = 0)
+    text(5, quad_res[5] + 1, paste('R-Squared =', r2_q))
+  }
+}
+# Visualise Fitted Quadratic Model
+fit_quad_mod <- function(data){
+  t <- time(data)
+  t2 <- t ^ 2
+  quad_mod <- lm(data ~ t + t2)
+  newd <- data.frame(t = t, t2 = t2)
+  pred <- predict(quad_mod, newd, interval = 'prediction')
+  plot(data, type = 'o', main = 'Fitted Quadractic Model Overlay')
+  lines(ts(as.vector(pred[,1]), start = min(t)), col = 2)
+}
+# Runs a Hypthesis Test for Normality fo Given Data Points
+normal_test <- function(x) {
+  shap <- shapiro.test(x)
+  shap_p <- round(shap$p.value, 3)
+  qqnorm(x)
+  qqline(x, col = 'red')
+  text('topleft', paste('p-value = ', shap_p))
+}
+```
